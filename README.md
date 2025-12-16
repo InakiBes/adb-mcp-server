@@ -3,36 +3,36 @@
 **Integration:** Stdio (JSON-RPC 2.0)
 
 **Overview:**
-Este servidor implementa el protocolo MCP para actuar como un puente intermedio entre Modelos de Lenguaje (LLMs) y dispositivos Android conectados físicamente o emulados. Abstrae comandos complejos de ADB CLI en herramientas invocables por la IA, permitiendo flujos de automatización, testing y depuración sin intervención humana directa.
+This server implements the MCP protocol to act as an intermediate bridge between Large Language Models (LLMs) and physically connected or emulated Android devices. It abstracts complex ADB CLI commands into AI-callable tools, enabling automation, testing, and debugging flows without direct human intervention.
 
-**Capacidades generales:**
+**General Capabilities:**
 
-  * Listar seriales conectados y elegir destino de comandos.
-  * Correr comandos arbitrarios vía `adb shell` para inspección, depuración y automatización.
-  * Capturar pantallas (`screencap`) y volcar el árbol de vistas (`uiautomator dump`) para análisis semántico.
-  * Instalar APKs y reinstrumentar builds rápidamente en el dispositivo objetivo.
+*   List connected serials and choose command targets.
+*   Run arbitrary commands via `adb shell` for inspection, debugging, and automation.
+*   Capture screens (`screencap`) and dump the view tree (`uiautomator dump`) for semantic analysis.
+*   Install APKs and quickly re-instrument builds on the target device.
 
-**Tools MCP expuestos:**
+**Exposed MCP Tools:**
 
-| Tool | Parámetros | Devuelve | Caso de uso |
+| Tool | Parameters | Returns | Use Case |
 | :--- | :--- | :--- | :--- |
-| `list_devices` | — | Lista de seriales conectados (uno por línea) | Descubrir a qué dispositivo apuntar o validar conexión. |
-| `adb_shell` | `command` (req.), `deviceId` (opt.) | `stdout` del comando en el dispositivo | Ejecutar `pm list packages`, `am start`, `input tap`, etc. |
-| `get_screenshot` | `deviceId` (opt.) | PNG base64 (screencap) | Extraer contexto visual para agentes con visión. |
-| `install_apk` | `path` (req.), `deviceId` (opt.) | `"ok"` tras instalación con `adb install -r` | Publicar una build local en caliente. |
-| `dump_hierarchy` | `deviceId` (opt.) | XML de `uiautomator dump /dev/tty` | Leer estructura de la UI y planear interacciones. |
+| `list_devices` | — | List of connected serials (one per line) | Discover which device to target or validate connection. |
+| `adb_shell` | `command` (req.), `deviceId` (opt.) | `stdout` of the command on the device | Execute `pm list packages`, `am start`, `input tap`, etc. |
+| `get_screenshot` | `deviceId` (opt.) | Base64 PNG (screencap) | Extract visual context for vision-enabled agents. |
+| `install_apk` | `path` (req.), `deviceId` (opt.) | `"ok"` after installation with `adb install -r` | Hot-deploy a local build. |
+| `dump_hierarchy` | `deviceId` (opt.) | XML from `uiautomator dump /dev/tty` | Read UI structure and plan interactions. |
 
-`deviceId` es siempre opcional; si se omite, ADB usa el dispositivo por defecto. El `screenshot` viene en base64 listo para decodificar en el cliente MCP.
+`deviceId` is always optional; if omitted, ADB uses the default device. The `screenshot` comes in base64 ready to be decoded by the MCP client.
 
-**Flujos posibles con estos tools:**
+**Possible flows with these tools:**
 
-  * Ejecutar smoke tests manuales: instalar una APK, lanzar la actividad principal, inspeccionar logs/estado con `adb_shell`.
-  * Depurar pantallas: capturar screenshot + árbol XML y pedir a la IA que describa elementos o sugiera taps.
-  * Operaciones de mantenimiento: listar dispositivos conectados en CI, limpiar datos de apps, forzar reinicios de paquetes, etc.
+*   **Execute manual smoke tests**: install an APK, launch the main activity, inspect logs/state with `adb_shell`.
+*   **Debug screens**: capture screenshot + XML tree and ask the AI to describe elements or suggest taps.
+*   **Maintenance operations**: list connected devices in CI, clear app data, force package restarts, etc.
 
-### Ejemplos de llamadas `tools/call`
+### `tools/call` Example Calls
 
-Todas las llamadas usan `method: "tools/call"` con `params.name` como el tool y `params.arguments` como el payload.
+All calls use `method: "tools/call"` with `params.name` as the tool and `params.arguments` as the payload.
 
 `list_devices`
 
@@ -42,13 +42,13 @@ Todas las llamadas usan `method: "tools/call"` con `params.name` como el tool y 
   "params": { "name": "list_devices", "arguments": {} }
 }
 ```
-Resultado típico (`content[0].text`):
+Typical result (`content[0].text`):
 ```
 emulator-5554
 0123456789ABCDEF
 ```
 
-`adb_shell` (con `deviceId` opcional)
+`adb_shell` (with optional `deviceId`)
 
 ```json
 {
@@ -62,7 +62,7 @@ emulator-5554
   }
 }
 ```
-Resultado (`content[0].text`): por ejemplo `14`.
+Result (`content[0].text`): e.g. `14`.
 
 `get_screenshot`
 
@@ -72,7 +72,7 @@ Resultado (`content[0].text`): por ejemplo `14`.
   "params": { "name": "get_screenshot", "arguments": { "deviceId": "emulator-5554" } }
 }
 ```
-Resultado (`content[0].text`): cadena base64 PNG lista para decodificar.
+Result (`content[0].text`): Base64 PNG string ready for decoding.
 
 `install_apk`
 
@@ -85,7 +85,7 @@ Resultado (`content[0].text`): cadena base64 PNG lista para decodificar.
   }
 }
 ```
-Resultado (`content[0].text`): `ok` si la instalación fue exitosa.
+Result (`content[0].text`): `ok` if the installation was successful.
 
 `dump_hierarchy`
 
@@ -95,14 +95,14 @@ Resultado (`content[0].text`): `ok` si la instalación fue exitosa.
   "params": { "name": "dump_hierarchy", "arguments": { "deviceId": "emulator-5554" } }
 }
 ```
-Resultado (`content[0].text`): XML completo de la jerarquía de vistas (`uiautomator dump /dev/tty`).
+Result (`content[0].text`): Complete XML of the view hierarchy (`uiautomator dump /dev/tty`).
 
-### Payload de Inicialización MCP (Código)
+### MCP Initialization Payload (Code)
 
-Esta es la descripción **crítica** que el agente debe devolver en la respuesta al método `initialize`. Es lo que la IA (Cursor/Claude) "leerá" para entender qué es este servidor.
+This is the **critical** description that the agent must return in the response to the `initialize` method. It is what the AI (Cursor/Claude) "reads" to understand what this server is.
 
 ```kotlin
-// Dentro de tu respuesta al método 'initialize'
+// Inside your response to the 'initialize' method
 val serverInfo = ServerInfo(
     name = "adb-mcp-server",
     version = "0.1.0"
@@ -110,12 +110,12 @@ val serverInfo = ServerInfo(
 
 val capabilities = Capabilities(
     tools = ToolsCapability(listChanged = true),
-    resources = null, // Opcional si decides exponer logs como recursos
-    prompts = null    // Opcional
+    resources = null, // Optional if you decide to expose logs as resources
+    prompts = null    // Optional
 )
 ```
 
-**Instrucción para el JSON final:**
+**Instruction for the final JSON:**
 
 ```json
 {
