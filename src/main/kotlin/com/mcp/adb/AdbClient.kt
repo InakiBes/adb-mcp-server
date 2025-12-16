@@ -1,5 +1,6 @@
 package com.mcp.adb
 
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.Base64
@@ -74,19 +75,13 @@ class AdbClient(
         if (deviceId.isNullOrBlank()) emptyList() else listOf("-s", deviceId)
 
     private fun runAdbCommand(args: List<String>): CommandResult {
-        val process = startProcess(args)
-        val exited = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
-        if (!exited) {
-            process.destroyForcibly()
-            throw IllegalStateException("adb command timed out after $timeoutSeconds seconds")
-        }
+        val output = executeAdbCommand(args)
+        val stdout = output.stdout.toString(Charsets.UTF_8)
+        val stderr = output.stderr.toString(Charsets.UTF_8)
 
-        val stdout = process.inputStream.readBytes().toString(Charsets.UTF_8)
-        val stderr = process.errorStream.readBytes().toString(Charsets.UTF_8)
-
-        if (process.exitValue() != 0) {
+        if (output.exitCode != 0) {
             throw IllegalStateException(
-                "adb command failed (exit ${process.exitValue()}): ${stderr.ifBlank { stdout }}",
+                "adb command failed (exit ${output.exitCode}): ${stderr.ifBlank { stdout }}",
             )
         }
 
@@ -94,23 +89,16 @@ class AdbClient(
     }
 
     private fun runAdbCommandForBytes(args: List<String>): ByteArray {
-        val process = startProcess(args)
-        val exited = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
-        if (!exited) {
-            process.destroyForcibly()
-            throw IllegalStateException("adb command timed out after $timeoutSeconds seconds")
-        }
+        val output = executeAdbCommand(args)
+        val stderr = output.stderr.toString(Charsets.UTF_8)
 
-        val stdout = process.inputStream.readBytes()
-        val stderr = process.errorStream.readBytes().toString(Charsets.UTF_8)
-
-        if (process.exitValue() != 0) {
+        if (output.exitCode != 0) {
             throw IllegalStateException(
-                "adb command failed (exit ${process.exitValue()}): $stderr",
+                "adb command failed (exit ${output.exitCode}): $stderr",
             )
         }
 
-        return stdout
+        return output.stdout
     }
 
     private fun startProcess(args: List<String>) = try {
@@ -122,5 +110,39 @@ class AdbClient(
         throw IllegalStateException("adb executable not found on PATH or not executable: $adbExecutable", e)
     }
 
+    private fun executeAdbCommand(args: List<String>): ProcessOutput {
+        val process = startProcess(args)
+        val stdoutBuffer = ByteArrayOutputStream()
+        val stderrBuffer = ByteArrayOutputStream()
+
+        // Drain streams while the process runs so large outputs (e.g., screenshots) do not block.
+        val stdoutThread = Thread {
+            process.inputStream.use { it.copyTo(stdoutBuffer) }
+        }
+        val stderrThread = Thread {
+            process.errorStream.use { it.copyTo(stderrBuffer) }
+        }
+        stdoutThread.start()
+        stderrThread.start()
+
+        val exited = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+        if (!exited) {
+            process.destroyForcibly()
+            stdoutThread.join(500)
+            stderrThread.join(500)
+            throw IllegalStateException("adb command timed out after $timeoutSeconds seconds")
+        }
+
+        stdoutThread.join()
+        stderrThread.join()
+
+        return ProcessOutput(
+            stdout = stdoutBuffer.toByteArray(),
+            stderr = stderrBuffer.toByteArray(),
+            exitCode = process.exitValue(),
+        )
+    }
+
     private data class CommandResult(val stdout: String, val stderr: String)
+    private data class ProcessOutput(val stdout: ByteArray, val stderr: ByteArray, val exitCode: Int)
 }
