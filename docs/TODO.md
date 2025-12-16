@@ -3,17 +3,17 @@
 This document outlines the tasks required to improve the security and usability of the ADB MCP (Model Context Protocol) server. The goal is to remove the generic and potentially unsafe `adb_shell` tool and replace it with a set of specific, controlled tools for common Android development and testing tasks.
 
 ## 1. Security & Restriction
-- [ ] **Remove `adb_shell` tool**: Remove the generic shell execution tool to restrict broad access and control the capabilities of the MCP.
+- [x] **Remove `adb_shell` tool**: Remove the generic shell execution tool to restrict broad access and control the capabilities of the MCP.
 
 ## 2. Basic Management Tools
 Implement the following tools for basic app and device management:
-- [ ] **`uninstall_package`**: Uninstall an application (with an option to keep data/cache).
-- [ ] **`start_activity`**: Launch an application or a specific Activity.
-- [ ] **`gradle_assemble`**: Compile the Android project and produce APK(s).
-- [ ] **`force_stop`**: Force stop a running application.
-- [ ] **`clear_app_data`**: Clear application data and state to ensure clean test environments.
-- [ ] **`current_activity`**: Retrieve the name of the Activity and task currently in the foreground.
-- [ ] **`deep_link`**: Open the corresponding application using a deep link or specific intent URI.
+- [x] **`uninstall_package`**: Uninstall an application (with an option to keep data/cache).
+- [x] **`start_activity`**: Launch an application or a specific Activity.
+- [x] **`gradle_assemble`**: Compile the Android project and produce APK(s).
+- [x] **`force_stop`**: Force stop a running application.
+- [x] **`clear_app_data`**: Clear application data and state to ensure clean test environments.
+- [x] **`current_activity`**: Retrieve the name of the Activity and task currently in the foreground.
+- [x] **`deep_link`**: Open the corresponding application using a deep link or specific intent URI.
 
 ## 3. UI Interaction Tools
 Implement specific tools to interact with the device UI:

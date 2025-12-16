@@ -17,6 +17,7 @@ import java.io.InputStreamReader
 
 class McpServer(
     private val adb: AdbService = AdbClient(),
+    private val gradle: GradleService = GradleClient(),
     private val json: Json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -85,11 +86,7 @@ class McpServer(
         val call = json.decodeFromJsonElement<CallToolParams>(params)
         val resultPayload: JsonElement = when (call.name) {
             "list_devices" -> json.encodeToJsonElement(adb.listDevices())
-            "adb_shell" -> {
-                val args = json.decodeFromJsonElement<AdbShellArgs>(call.arguments ?: emptyObject)
-                JsonPrimitive(adb.executeShell(args.command, args.deviceId))
-            }
-
+            
             "get_screenshot" -> {
                 val args = json.decodeFromJsonElement<DeviceScopedArgs>(call.arguments ?: emptyObject)
                 JsonPrimitive(adb.captureScreenshot(args.deviceId))
@@ -100,10 +97,53 @@ class McpServer(
                 adb.installApk(args.path, args.deviceId)
                 JsonPrimitive("ok")
             }
+            
+            "uninstall_package" -> {
+                val args = json.decodeFromJsonElement<UninstallPackageArgs>(call.arguments ?: emptyObject)
+                adb.uninstallApp(args.packageName, args.keepData, args.deviceId)
+                JsonPrimitive("ok")
+            }
+
+            "start_activity" -> {
+                val args = json.decodeFromJsonElement<StartActivityArgs>(call.arguments ?: emptyObject)
+                adb.startActivity(args.packageName, args.activityName, args.action, args.dataUri, args.deviceId)
+                JsonPrimitive("ok")
+            }
+            
+            "deep_link" -> {
+                 val args = json.decodeFromJsonElement<DeepLinkArgs>(call.arguments ?: emptyObject)
+                 // Map deep link to start activity with data uri
+                 // Assuming deep link implies ACTION_VIEW usually, but intent scheme works too.
+                 val action = "android.intent.action.VIEW"
+                 adb.startActivity(args.packageName, args.activityName, action, args.uri, args.deviceId)
+                 JsonPrimitive("ok")
+            }
+
+            "force_stop" -> {
+                val args = json.decodeFromJsonElement<PackageScopedArgs>(call.arguments ?: emptyObject)
+                adb.stopApp(args.packageName, args.deviceId)
+                JsonPrimitive("ok")
+            }
+
+            "clear_app_data" -> {
+                val args = json.decodeFromJsonElement<PackageScopedArgs>(call.arguments ?: emptyObject)
+                adb.clearAppData(args.packageName, args.deviceId)
+                JsonPrimitive("ok")
+            }
+            
+            "current_activity" -> {
+                val args = json.decodeFromJsonElement<DeviceScopedArgs>(call.arguments ?: emptyObject)
+                JsonPrimitive(adb.getCurrentActivity(args.deviceId))
+            }
 
             "dump_hierarchy" -> {
                 val args = json.decodeFromJsonElement<DeviceScopedArgs>(call.arguments ?: emptyObject)
                 JsonPrimitive(adb.dumpHierarchy(args.deviceId))
+            }
+            
+            "gradle_assemble" -> {
+                val args = json.decodeFromJsonElement<GradleAssembleArgs>(call.arguments ?: emptyObject)
+                JsonPrimitive(gradle.assemble(args.projectPath, args.buildType ?: "Debug"))
             }
 
             else -> return errorResponse(
@@ -137,9 +177,13 @@ class McpServer(
         error = JsonRpcError(code = code, message = message),
     )
 
-    private data class AdbShellArgs(val command: String, val deviceId: String? = null)
     private data class DeviceScopedArgs(val deviceId: String? = null)
     private data class InstallApkArgs(val path: String, val deviceId: String? = null)
+    private data class UninstallPackageArgs(val packageName: String, val keepData: Boolean = false, val deviceId: String? = null)
+    private data class StartActivityArgs(val packageName: String, val activityName: String? = null, val action: String? = null, val dataUri: String? = null, val deviceId: String? = null)
+    private data class DeepLinkArgs(val packageName: String, val uri: String, val activityName: String? = null, val deviceId: String? = null)
+    private data class PackageScopedArgs(val packageName: String, val deviceId: String? = null)
+    private data class GradleAssembleArgs(val projectPath: String, val buildType: String? = "Debug")
 
     private val emptyObject: JsonObject = buildJsonObject { }
 
@@ -154,32 +198,11 @@ class McpServer(
             ),
         ),
         Tool(
-            name = "adb_shell",
-            description = "Execute an arbitrary adb shell command",
-            inputSchema = ToolInputSchema(
-                properties = mapOf(
-                    "command" to ToolInputProperty(
-                        type = "string",
-                        description = "Shell command to execute on device",
-                    ),
-                    "deviceId" to ToolInputProperty(
-                        type = "string",
-                        description = "Optional device serial",
-                    ),
-                ),
-                required = listOf("command"),
-                additionalProperties = false,
-            ),
-        ),
-        Tool(
             name = "get_screenshot",
             description = "Capture a screenshot from the device (base64-encoded PNG)",
             inputSchema = ToolInputSchema(
                 properties = mapOf(
-                    "deviceId" to ToolInputProperty(
-                        type = "string",
-                        description = "Optional device serial",
-                    ),
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
                 ),
                 required = emptyList(),
                 additionalProperties = false,
@@ -190,16 +213,87 @@ class McpServer(
             description = "Install an APK on the device",
             inputSchema = ToolInputSchema(
                 properties = mapOf(
-                    "path" to ToolInputProperty(
-                        type = "string",
-                        description = "Path to APK on the host",
-                    ),
-                    "deviceId" to ToolInputProperty(
-                        type = "string",
-                        description = "Optional device serial",
-                    ),
+                    "path" to ToolInputProperty(type = "string", description = "Path to APK on the host"),
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
                 ),
                 required = listOf("path"),
+                additionalProperties = false,
+            ),
+        ),
+        Tool(
+            name = "uninstall_package",
+            description = "Uninstall an application",
+            inputSchema = ToolInputSchema(
+                properties = mapOf(
+                    "packageName" to ToolInputProperty(type = "string", description = "Package name to uninstall"),
+                    "keepData" to ToolInputProperty(type = "boolean", description = "Keep data and cache directories"),
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
+                ),
+                required = listOf("packageName"),
+                additionalProperties = false,
+            ),
+        ),
+        Tool(
+            name = "start_activity",
+            description = "Launch an application or a specific Activity",
+            inputSchema = ToolInputSchema(
+                properties = mapOf(
+                    "packageName" to ToolInputProperty(type = "string", description = "Package name"),
+                    "activityName" to ToolInputProperty(type = "string", description = "Optional activity class name"),
+                    "action" to ToolInputProperty(type = "string", description = "Optional intent action"),
+                    "dataUri" to ToolInputProperty(type = "string", description = "Optional intent data URI"),
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
+                ),
+                required = listOf("packageName"),
+                additionalProperties = false,
+            ),
+        ),
+        Tool(
+            name = "deep_link",
+            description = "Open application using a deep link URI",
+            inputSchema = ToolInputSchema(
+                properties = mapOf(
+                    "packageName" to ToolInputProperty(type = "string", description = "Package name"),
+                    "uri" to ToolInputProperty(type = "string", description = "Deep link URI"),
+                    "activityName" to ToolInputProperty(type = "string", description = "Optional specific activity to handle the link"),
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
+                ),
+                required = listOf("packageName", "uri"),
+                additionalProperties = false,
+            ),
+        ),
+        Tool(
+            name = "force_stop",
+            description = "Force stop a running application",
+            inputSchema = ToolInputSchema(
+                properties = mapOf(
+                    "packageName" to ToolInputProperty(type = "string", description = "Package name"),
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
+                ),
+                required = listOf("packageName"),
+                additionalProperties = false,
+            ),
+        ),
+        Tool(
+            name = "clear_app_data",
+            description = "Clear application data",
+            inputSchema = ToolInputSchema(
+                properties = mapOf(
+                    "packageName" to ToolInputProperty(type = "string", description = "Package name"),
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
+                ),
+                required = listOf("packageName"),
+                additionalProperties = false,
+            ),
+        ),
+        Tool(
+            name = "current_activity",
+            description = "Retrieve the current foreground activity",
+            inputSchema = ToolInputSchema(
+                properties = mapOf(
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
+                ),
+                required = emptyList(),
                 additionalProperties = false,
             ),
         ),
@@ -208,12 +302,21 @@ class McpServer(
             description = "Dump the UI hierarchy XML using uiautomator",
             inputSchema = ToolInputSchema(
                 properties = mapOf(
-                    "deviceId" to ToolInputProperty(
-                        type = "string",
-                        description = "Optional device serial",
-                    ),
+                    "deviceId" to ToolInputProperty(type = "string", description = "Optional device serial"),
                 ),
                 required = emptyList(),
+                additionalProperties = false,
+            ),
+        ),
+        Tool(
+            name = "gradle_assemble",
+            description = "Compile Android project",
+            inputSchema = ToolInputSchema(
+                properties = mapOf(
+                    "projectPath" to ToolInputProperty(type = "string", description = "Absolute path to project root"),
+                    "buildType" to ToolInputProperty(type = "string", description = "Build type (e.g. Debug, Release). Defaults to Debug."),
+                ),
+                required = listOf("projectPath"),
                 additionalProperties = false,
             ),
         ),
