@@ -2,3 +2,5 @@
 .idea
 .kotlin
 build
+gradle-*/
+gradle-*.zip
